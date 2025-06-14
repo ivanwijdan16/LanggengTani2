@@ -329,7 +329,7 @@
                         <div class="input-group">
                             <input type="password" name="password" id="password" class="form-control">
                             <button type="button" class="password-toggle" onclick="togglePassword('password')">
-                                <i class="bx bx-show"></i>
+                                <i class="bx bx-hide"></i>
                             </button>
                         </div>
                         <div class="helper-text">Kosongkan jika tidak ingin mengubah password</div>
@@ -360,12 +360,12 @@
 
             if (input.type === 'password') {
                 input.type = 'text';
-                icon.classList.remove('bx-show');
-                icon.classList.add('bx-hide');
-            } else {
-                input.type = 'password';
                 icon.classList.remove('bx-hide');
                 icon.classList.add('bx-show');
+            } else {
+                input.type = 'password';
+                icon.classList.remove('bx-show');
+                icon.classList.add('bx-hide');
             }
         }
     </script>

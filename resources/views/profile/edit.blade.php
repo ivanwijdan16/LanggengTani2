@@ -74,7 +74,7 @@
                                 <input type="password" class="form-control" id="current_password" name="current_password"
                                     required>
                                 <button type="button" class="password-toggle" onclick="togglePassword('current_password')">
-                                    <i class="bx bx-show"></i>
+                                    <i class="bx bx-hide"></i>
                                 </button>
                             </div>
                             @error('current_password')
@@ -90,7 +90,7 @@
                             <div class="input-group">
                                 <input type="password" class="form-control" id="password" name="password">
                                 <button type="button" class="password-toggle" onclick="togglePassword('password')">
-                                    <i class="bx bx-show"></i>
+                                    <i class="bx bx-hide"></i>
                                 </button>
                             </div>
                             @error('password')
@@ -108,7 +108,7 @@
                                     name="password_confirmation">
                                 <button type="button" class="password-toggle"
                                     onclick="togglePassword('password_confirmation')">
-                                    <i class="bx bx-show"></i>
+                                    <i class="bx bx-hide"></i>
                                 </button>
                             </div>
                         </div>
@@ -134,12 +134,12 @@
 
             if (input.type === 'password') {
                 input.type = 'text';
-                icon.classList.remove('bx-show');
-                icon.classList.add('bx-hide');
-            } else {
-                input.type = 'password';
                 icon.classList.remove('bx-hide');
                 icon.classList.add('bx-show');
+            } else {
+                input.type = 'password';
+                icon.classList.remove('bx-show');
+                icon.classList.add('bx-hide');
             }
         }
     </script>

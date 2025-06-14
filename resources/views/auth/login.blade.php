@@ -1,4 +1,7 @@
 <x-guest-layout>
+    <!-- Add Boxicons CDN if not already included -->
+    <link href='https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css' rel='stylesheet'>
+
     <!-- Session Status -->
     <x-auth-session-status class="mb-4" :status="session('status')" />
 
@@ -19,8 +22,14 @@
         <!-- Password -->
         <div>
             <x-input-label for="password" :value="__('Password')" />
-            <x-text-input id="password" class="block mt-1 w-full" type="password" name="password" required
-                autocomplete="current-password" />
+            <div class="relative">
+                <x-text-input id="password" class="block mt-1 w-full pr-12" type="password" name="password" required
+                    autocomplete="current-password" />
+                <button type="button" class="absolute inset-y-0 right-0 pr-3 flex items-center cursor-pointer"
+                    onclick="togglePassword('password')">
+                    <i id="password-icon" class="bx bx-hide text-gray-500 hover:text-gray-700 text-xl"></i>
+                </button>
+            </div>
             <x-input-error :messages="$errors->get('password')" class="mt-2" />
         </div>
 
@@ -57,4 +66,21 @@
       </a>
     </p>
   </div> --}}
+
+    <script>
+        function togglePassword(inputId) {
+            const input = document.getElementById(inputId);
+            const icon = document.getElementById(inputId + '-icon');
+
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.classList.remove('bx-hide');
+                icon.classList.add('bx-show');
+            } else {
+                input.type = 'password';
+                icon.classList.remove('bx-show');
+                icon.classList.add('bx-hide');
+            }
+        }
+    </script>
 </x-guest-layout>
