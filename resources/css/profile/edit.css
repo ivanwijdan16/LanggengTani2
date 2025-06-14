@@ -1,0 +1,147 @@
+.profile-card {
+    border-radius: 15px;
+    border: none;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+    overflow: hidden;
+    background-color: white;
+    margin-bottom: 20px;
+}
+
+.profile-header {
+    padding: 1.5rem;
+    border-bottom: 1px solid #f1f5f9;
+    position: relative;
+}
+
+.profile-title {
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 0;
+    font-size: 1.5rem;
+    display: flex;
+    align-items: center;
+}
+
+.profile-title i {
+    color: #149d80;
+    margin-right: 10px;
+    font-size: 1.25rem;
+}
+
+.profile-body {
+    padding: 2rem;
+}
+
+.form-label {
+    font-weight: 500;
+    color: #475569;
+    margin-bottom: 0.5rem;
+}
+
+.form-control {
+    border-radius: 10px;
+    border: 1px solid #e2e8f0;
+    padding: 12px 15px;
+    background-color: #f8fafc;
+    transition: all 0.3s ease;
+}
+
+.form-control:focus {
+    border-color: #149d80;
+    background-color: white;
+    box-shadow: 0 0 0 0.25rem rgba(0, 114, 79, 0.15);
+}
+
+.input-group {
+    position: relative;
+}
+
+.password-toggle {
+    position: absolute;
+    right: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 10;
+    background: none;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+}
+
+.password-toggle:hover {
+    color: #149d80;
+}
+
+.form-section {
+    background-color: #f8fafc;
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.form-section-title {
+    font-weight: 600;
+    color: #1e293b;
+    margin-bottom: 1.25rem;
+    font-size: 1.1rem;
+    display: flex;
+    align-items: center;
+}
+
+.form-section-title i {
+    margin-right: 8px;
+    color: #149d80;
+}
+
+.text-danger {
+    color: #ef4444;
+    font-size: 0.875rem;
+    margin-top: 0.5rem;
+    display: block;
+}
+
+.btn-primary {
+    background-color: #149d80;
+    border: none;
+    border-radius: 10px;
+    padding: 0.75rem 2rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.btn-primary:hover {
+    background-color: #0c8b71;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0, 114, 79, 0.15);
+}
+
+.alert {
+    border-radius: 10px;
+    padding: 1rem;
+    margin-bottom: 2rem;
+    border: none;
+}
+
+.alert-success {
+    background-color: #ecfdf5;
+    color: #10b981;
+    border-left: 4px solid #10b981;
+}
+
+.profile-footer {
+    padding: 1.5rem 2rem;
+    border-top: 1px solid #f1f5f9;
+    display: flex;
+    justify-content: flex-end;
+    background-color: #f8fafc;
+}
+
+@media (max-width: 768px) {
+    .profile-body {
+        padding: 1.5rem;
+    }
+
+    .form-section {
+        padding: 1.25rem;
+    }
+}
