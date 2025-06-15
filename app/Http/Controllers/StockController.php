@@ -94,6 +94,7 @@ class StockController extends Controller
 
         return view('stocks.sizes', compact('masterStock', 'sizeGroups', 'sizeImages', 'sort', 'direction'));
     }
+
     public function batches($masterId, $size, Request $request)
     {
         $masterStock = MasterStock::findOrFail($masterId);
@@ -198,7 +199,7 @@ class StockController extends Controller
         $productSizes = [];
         $productQuantities = [];
         $productPrices = [];
-        
+
         // Prepare log data array
         $logData = [];
 
@@ -262,7 +263,7 @@ class StockController extends Controller
                         'sku' => $sku
                     ]);
                 }
-            
+
                 $masterStockId = $existingMasterStock->id;
 
                 if ($request->hasFile("image.$i")) {
@@ -290,48 +291,58 @@ class StockController extends Controller
                 $masterStockId = $masterStock->id;
             }
 
-            // Now handle the stock
-            // FIXED: Get batch number including soft deleted stocks
-            $batchNumber = Stock::withTrashed()
-                ->where('master_stock_id', $masterStockId)
-                ->where('size', $size)
-                ->count() + 1;
-
-            // Generate the new stock_id format
-            $stockId = IdGenerator::generateStockId($sku, $size, $expiration_date, $batchNumber);
-
-            // Check if stock with this ID exists (including soft deleted)
-            $existingStock = Stock::withTrashed()->where('stock_id', $stockId)->first();
+            // PERBAIKAN: Gunakan helper method untuk pencarian stok existing
+            $existingStock = $this->findExistingStock($masterStockId, $size, $expiration_date);
 
             if ($existingStock) {
                 if ($existingStock->trashed()) {
-                    // Jika stok sebelumnya telah dihapus (soft delete), restore dan update jumlahnya
+                    // Restore dan update stok yang telah dihapus
                     $existingStock->restore();
-                    $existingStock->quantity = $quantity;
+                    $existingStock->quantity += $quantity;
                     $existingStock->purchase_price = $purchase_price;
                     $existingStock->selling_price = $selling_price;
-                    $existingStock->expiration_date = $expiration_date;
                     $existingStock->retail_price = $retail_price;
-                    $existingStock->retail_quantity = $retail_quantity;
+                    $existingStock->retail_quantity = ($existingStock->retail_quantity ?? 0) + ($retail_quantity ?? 0);
                     $existingStock->save();
-                    
+
                     // Also check if master stock is soft-deleted and restore it
-                    $masterStock = MasterStock::withTrashed()->find($existingStock->master_stock_id);
-                    if ($masterStock && $masterStock->trashed()) {
-                        $masterStock->restore();
+                    $masterStockCheck = MasterStock::withTrashed()->find($existingStock->master_stock_id);
+                    if ($masterStockCheck && $masterStockCheck->trashed()) {
+                        $masterStockCheck->restore();
                         Log::channel('daily')->info('Master stock restored due to stock restore', [
                             'user_id' => auth()->id() ?? 'system',
-                            'master_stock_id' => $masterStock->id,
-                            'name' => $masterStock->name
+                            'master_stock_id' => $masterStockCheck->id,
+                            'name' => $masterStockCheck->name
                         ]);
                     }
+
+                    Log::channel('daily')->info('Stock restored and updated', [
+                        'stock_id' => $existingStock->stock_id,
+                        'added_quantity' => $quantity,
+                        'new_total_quantity' => $existingStock->quantity
+                    ]);
                 } else {
-                    // Jika stok ada dan tidak dihapus, tambahkan jumlahnya
-                    $existingStock->increment('quantity', $quantity);
+                    // Update stok yang sudah ada
+                    $existingStock->quantity += $quantity;
+                    $existingStock->purchase_price = $purchase_price;
+                    $existingStock->selling_price = $selling_price;
+                    if ($retail_price !== null) {
+                        $existingStock->retail_price = $retail_price;
+                    }
+                    if ($retail_quantity !== null) {
+                        $existingStock->retail_quantity = ($existingStock->retail_quantity ?? 0) + $retail_quantity;
+                    }
+                    $existingStock->save();
+
+                    Log::channel('daily')->info('Stock quantity updated', [
+                        'stock_id' => $existingStock->stock_id,
+                        'added_quantity' => $quantity,
+                        'new_total_quantity' => $existingStock->quantity
+                    ]);
                 }
-                // Catat pembelian ke tabel pembelian
+
                 $this->createPembelian($existingStock, $quantity, $purchase_price, $expiration_date, $master_pembelian);
-                
+
                 // Log existing stock update
                 $logData[] = [
                     'action' => 'update_stock',
@@ -345,7 +356,13 @@ class StockController extends Controller
                     'expiration_date' => $expiration_date
                 ];
             } else {
-                // Jika stok baru, buat entri stok baru
+                // PERBAIKAN: Gunakan helper method untuk generate batch number
+                $batchNumber = $this->generateBatchNumber($masterStockId, $size, $expiration_date);
+
+                // Generate stock ID
+                $stockId = IdGenerator::generateStockId($sku, $size, $expiration_date, $batchNumber);
+
+                // Buat stok baru
                 $stock = Stock::create([
                     'master_stock_id' => $masterStockId,
                     'size' => $size,
@@ -359,10 +376,14 @@ class StockController extends Controller
                 ]);
 
                 $stock->checkAndCreateNotifications();
-
-                // Catat pembelian ke tabel pembelian
                 $this->createPembelian($stock, $quantity, $purchase_price, $expiration_date, $master_pembelian);
-                
+
+                Log::channel('daily')->info('New stock created', [
+                    'stock_id' => $stock->stock_id,
+                    'batch_number' => $batchNumber,
+                    'quantity' => $quantity
+                ]);
+
                 // Log new stock creation
                 $logData[] = [
                     'action' => 'create_stock',
@@ -377,7 +398,7 @@ class StockController extends Controller
                 ];
             }
         }
-        
+
         // Log all stock creation/update data
         Log::channel('daily')->info('Stock created/updated', [
             'user_id' => auth()->id() ?? 'system',
@@ -439,22 +460,8 @@ class StockController extends Controller
             'date' => date('Y-m-d'),
         ]);
 
-        // FIXED: Get the batch number for new stock including soft deleted ones
-        $batchNumber = Stock::withTrashed()
-            ->where('master_stock_id', $validated['master_stock_id'])
-            ->where('size', $validated['size'])
-            ->count() + 1;
-
-        // Generate stock ID
-        $stockId = IdGenerator::generateStockId(
-            $masterStock->sku,
-            $validated['size'],
-            $validated['expiration_date'],
-            $batchNumber
-        );
-        
-        // Check if stock with this ID exists (including soft deleted)
-        $existingStock = Stock::withTrashed()->where('stock_id', $stockId)->first();
+        // PERBAIKAN: Gunakan helper method untuk pencarian stok existing
+        $existingStock = $this->findExistingStock($validated['master_stock_id'], $validated['size'], $validated['expiration_date']);
 
         if ($existingStock) {
             if ($existingStock->trashed()) {
@@ -462,10 +469,9 @@ class StockController extends Controller
                 $existingStock->restore();
                 $existingStock->purchase_price = $validated['purchase_price'];
                 $existingStock->selling_price = $validated['selling_price'];
-                $existingStock->quantity = $validated['quantity'];
-                $existingStock->expiration_date = $validated['expiration_date'];
+                $existingStock->quantity += $validated['quantity'];  // Tambahkan quantity
                 $existingStock->save();
-                
+
                 // Also check if master stock is soft-deleted and restore it
                 $masterStockCheck = MasterStock::withTrashed()->find($existingStock->master_stock_id);
                 if ($masterStockCheck && $masterStockCheck->trashed()) {
@@ -476,13 +482,13 @@ class StockController extends Controller
                         'name' => $masterStockCheck->name
                     ]);
                 }
-                
+
                 // Create pembelian record
                 $this->createPembelian($existingStock, $validated['quantity'], $validated['purchase_price'], $validated['expiration_date'], $master_pembelian);
-                
+
                 // Check for notifications
                 $existingStock->checkAndCreateNotifications();
-                
+
                 // Log stock size restore
                 Log::channel('daily')->info('Stock size restored', [
                     'user_id' => auth()->id() ?? 'system',
@@ -495,18 +501,21 @@ class StockController extends Controller
                     'selling_price' => $validated['selling_price'],
                     'expiration_date' => $validated['expiration_date']
                 ]);
-                
+
                 $stock = $existingStock;
             } else {
-                // If stock exists but isn't deleted, update quantity
-                $existingStock->increment('quantity', $validated['quantity']);
-                
+                // If stock exists but isn't deleted, update quantity and prices
+                $existingStock->quantity += $validated['quantity'];
+                $existingStock->purchase_price = $validated['purchase_price'];  // Update harga beli
+                $existingStock->selling_price = $validated['selling_price'];   // Update harga jual
+                $existingStock->save();
+
                 // Create pembelian record
                 $this->createPembelian($existingStock, $validated['quantity'], $validated['purchase_price'], $validated['expiration_date'], $master_pembelian);
-                
+
                 // Check for notifications
                 $existingStock->checkAndCreateNotifications();
-                
+
                 // Log stock size update
                 Log::channel('daily')->info('Stock size quantity updated', [
                     'user_id' => auth()->id() ?? 'system',
@@ -521,10 +530,21 @@ class StockController extends Controller
                     'selling_price' => $validated['selling_price'],
                     'expiration_date' => $validated['expiration_date']
                 ]);
-                
+
                 $stock = $existingStock;
             }
         } else {
+            // PERBAIKAN: Gunakan helper method untuk generate batch number
+            $batchNumber = $this->generateBatchNumber($validated['master_stock_id'], $validated['size'], $validated['expiration_date']);
+
+            // Generate stock ID
+            $stockId = IdGenerator::generateStockId(
+                $masterStock->sku,
+                $validated['size'],
+                $validated['expiration_date'],
+                $batchNumber
+            );
+
             // Create stock
             $stock = Stock::create([
                 'master_stock_id' => $validated['master_stock_id'],
@@ -541,7 +561,7 @@ class StockController extends Controller
 
             // Check for notifications
             $stock->checkAndCreateNotifications();
-            
+
             // Log stock size creation
             Log::channel('daily')->info('Stock size created', [
                 'user_id' => auth()->id() ?? 'system',
@@ -690,11 +710,11 @@ class StockController extends Controller
         if (!$hasTransactions || $isStockZero || $isExpired) {
             // Jika barang memiliki riwayat penjualan atau pembelian, gunakan soft delete
             $hasPembelian = \App\Models\Pembelian::where('stock_id', $stock->id)->exists();
-            
+
             if ($hasTransactions || $hasPembelian) {
                 // Soft delete the stock
                 $stock->delete();
-                
+
                 // Log soft delete operation
                 Log::channel('daily')->info('Stock soft deleted', [
                     'user_id' => auth()->id() ?? 'system',
@@ -706,7 +726,7 @@ class StockController extends Controller
                     'reason' => $isExpired ? 'expired' : ($isStockZero ? 'zero_stock' : 'manual_deletion'),
                     'delete_type' => 'soft_delete'
                 ]);
-                
+
                 return redirect()->back()->with([
                     'showSuccessModal' => true,
                     'message' => 'Stok berhasil dihapus. Data historis tetap tersimpan.'
@@ -724,9 +744,9 @@ class StockController extends Controller
                     'reason' => $isExpired ? 'expired' : ($isStockZero ? 'zero_stock' : 'manual_deletion'),
                     'delete_type' => 'force_delete'
                 ];
-                
+
                 Log::channel('daily')->info('Stock permanently deleted', $logData);
-                
+
                 $stock->forceDelete();
                 return redirect()->back()->with([
                     'showSuccessModal' => true,
@@ -744,7 +764,7 @@ class StockController extends Controller
                 'quantity' => $stock->quantity,
                 'reason' => 'active_stock_with_transactions'
             ]);
-            
+
             return back()->with([
                 'showErrorModal' => true,
                 'stockId' => $stock->id,
@@ -760,13 +780,13 @@ class StockController extends Controller
         // Check if any associated stocks have transaction history - include trashed stocks
         $stockIds = Stock::withTrashed()->where('master_stock_id', $id)->pluck('id');
         $hasTransactions = \App\Models\TransactionItem::whereIn('product_id', $stockIds)->exists();
-        
+
         // Check if any associated stocks have purchase history
         $hasPembelian = \App\Models\Pembelian::whereIn('stock_id', $stockIds)->exists();
 
         // Collect information about the stocks for logging - include trashed stocks
         $stocks = Stock::withTrashed()->where('master_stock_id', $id)->get();
-        
+
         // Log the actual count before processing for debugging
         Log::channel('daily')->info('Master stock deletion started', [
             'user_id' => auth()->id() ?? 'system',
@@ -776,8 +796,8 @@ class StockController extends Controller
             'stocks_ids' => $stocks->pluck('id')->toArray(),
             'stocks_stock_ids' => $stocks->pluck('stock_id')->toArray()
         ]);
-        
-        $stocksData = $stocks->map(function($stock) {
+
+        $stocksData = $stocks->map(function ($stock) {
             return [
                 'id' => $stock->id,
                 'stock_id' => $stock->stock_id,
@@ -790,10 +810,10 @@ class StockController extends Controller
         if ($hasTransactions || $hasPembelian) {
             // Use soft delete for stocks
             Stock::where('master_stock_id', $id)->delete();
-            
+
             // Also soft delete the master stock
             $masterStock->delete();
-            
+
             // Log master stock soft deletion
             Log::channel('daily')->info('Master stock soft deleted with all associated stocks', [
                 'user_id' => auth()->id() ?? 'system',
@@ -816,13 +836,13 @@ class StockController extends Controller
                 'stocks_count' => count($stocksData),
                 'stocks' => $stocksData
             ];
-            
+
             Log::channel('daily')->info('Master stock permanently deleted with all associated stocks', $logData);
-            
+
             // Only if there's no purchase or sales history, force delete
             // Force delete stocks including soft-deleted ones
             Stock::withTrashed()->where('master_stock_id', $id)->forceDelete();
-            
+
             // Delete master stock (image and record)
             if ($masterStock->image) {
                 Storage::disk('public')->delete($masterStock->image);
@@ -847,7 +867,7 @@ class StockController extends Controller
 
         // Check if any stocks have transaction history
         $hasTransactions = \App\Models\TransactionItem::whereIn('product_id', $stockIds)->exists();
-        
+
         // Check if any associated stocks have purchase history
         $hasPembelian = \App\Models\Pembelian::whereIn('stock_id', $stockIds)->exists();
 
@@ -855,7 +875,7 @@ class StockController extends Controller
         $stocks = Stock::withTrashed()->where('master_stock_id', $masterId)
             ->where('size', $size)
             ->get();
-        
+
         // Log the actual count before processing for debugging
         Log::channel('daily')->info('Size deletion started', [
             'user_id' => auth()->id() ?? 'system',
@@ -866,8 +886,8 @@ class StockController extends Controller
             'stocks_ids' => $stocks->pluck('id')->toArray(),
             'stocks_stock_ids' => $stocks->pluck('stock_id')->toArray()
         ]);
-            
-        $stocksData = $stocks->map(function($stock) {
+
+        $stocksData = $stocks->map(function ($stock) {
             return [
                 'id' => $stock->id,
                 'stock_id' => $stock->stock_id,
@@ -882,7 +902,7 @@ class StockController extends Controller
             Stock::where('master_stock_id', $masterId)
                 ->where('size', $size)
                 ->delete();
-                
+
             // Log size deletion (soft delete)
             Log::channel('daily')->info('Stock size soft deleted', [
                 'user_id' => auth()->id() ?? 'system',
@@ -905,9 +925,9 @@ class StockController extends Controller
                 'stocks_count' => count($stocksData),
                 'stocks' => $stocksData
             ];
-            
+
             Log::channel('daily')->info('Stock size permanently deleted', $logData);
-            
+
             // Only if there's no purchase or sales history, force delete
             // Force delete stocks including soft-deleted ones
             Stock::withTrashed()->where('master_stock_id', $masterId)
@@ -919,6 +939,72 @@ class StockController extends Controller
             'showSuccessModal' => true,
             'message' => 'Stok dengan ukuran ' . $size . ' berhasil dihapus.'
         ]);
+    }
+
+    // HELPER METHODS - PERBAIKAN UTAMA
+
+    /**
+     * Helper method untuk mencari stok yang sudah ada berdasarkan tanggal kadaluwarsa
+     */
+    private function findExistingStock($masterStockId, $size, $expirationDate)
+    {
+        // Konversi tanggal kadaluwarsa ke format yang konsisten
+        $expirationDateFormatted = \Carbon\Carbon::parse($expirationDate)->format('Y-m-d');
+
+        // Debug: Log untuk melihat tanggal yang dicari
+        Log::channel('daily')->debug('Searching for existing stock', [
+            'master_stock_id' => $masterStockId,
+            'size' => $size,
+            'expiration_date_input' => $expirationDate,
+            'expiration_date_formatted' => $expirationDateFormatted
+        ]);
+
+        $existingStock = Stock::withTrashed()
+            ->where('master_stock_id', $masterStockId)
+            ->where('size', $size)
+            ->whereRaw('DATE(expiration_date) = ?', [$expirationDateFormatted])
+            ->first();
+
+        // Debug: Log hasil pencarian
+        if ($existingStock) {
+            Log::channel('daily')->debug('Found existing stock', [
+                'stock_id' => $existingStock->stock_id,
+                'existing_expiration_date' => $existingStock->expiration_date,
+                'is_trashed' => $existingStock->trashed()
+            ]);
+        } else {
+            Log::channel('daily')->debug('No existing stock found');
+        }
+
+        return $existingStock;
+    }
+
+    /**
+     * Helper method untuk generate batch number yang akurat
+     */
+    private function generateBatchNumber($masterStockId, $size, $expirationDate)
+    {
+        // Konversi tanggal kadaluwarsa ke format yang konsisten
+        $expirationDateFormatted = \Carbon\Carbon::parse($expirationDate)->format('Y-m-d');
+
+        // Hitung batch berdasarkan tanggal kadaluwarsa yang unik
+        $existingBatches = Stock::withTrashed()
+            ->where('master_stock_id', $masterStockId)
+            ->where('size', $size)
+            ->selectRaw('DATE(expiration_date) as exp_date, MIN(id) as first_id')
+            ->groupBy(DB::raw('DATE(expiration_date)'))
+            ->orderBy('first_id')
+            ->get();
+
+        // Debug: Log existing batches
+        Log::channel('daily')->debug('Existing batches for batch number generation', [
+            'master_stock_id' => $masterStockId,
+            'size' => $size,
+            'existing_batches_count' => $existingBatches->count(),
+            'existing_dates' => $existingBatches->pluck('exp_date')->toArray()
+        ]);
+
+        return $existingBatches->count() + 1;
     }
 
     // Fungsi untuk mencatat pembelian baru
@@ -935,7 +1021,7 @@ class StockController extends Controller
 
         Pembelian::create($pembelianData);
     }
-    
+
     /**
      * Clean up duplicate master stocks with the same SKU
      * This method can be called manually or via a scheduled command
@@ -948,10 +1034,10 @@ class StockController extends Controller
             ->groupBy('sku')
             ->having('count', '>', 1)
             ->get();
-            
+
         $cleaned = 0;
         $errors = [];
-        
+
         foreach ($duplicateSKUs as $duplicate) {
             try {
                 // Get all master stocks with this SKU, ordered by ID (oldest first)
@@ -959,40 +1045,40 @@ class StockController extends Controller
                     ->where('sku', $duplicate->sku)
                     ->orderBy('id')
                     ->get();
-                
+
                 // The first one is the one we'll keep
                 $primaryMasterStock = $masterStocks->first();
-                
+
                 // Restore it if it's soft-deleted
                 if ($primaryMasterStock->trashed()) {
                     $primaryMasterStock->restore();
                 }
-                
+
                 // For each additional master stock, transfer its stocks to the primary one
                 foreach ($masterStocks as $index => $masterStock) {
                     // Skip the primary master stock
                     if ($index === 0) continue;
-                    
+
                     // Get all stocks associated with this duplicate master stock
                     $stocks = Stock::withTrashed()
                         ->where('master_stock_id', $masterStock->id)
                         ->get();
-                    
+
                     // Transfer each stock to the primary master stock
                     foreach ($stocks as $stock) {
                         $stock->master_stock_id = $primaryMasterStock->id;
                         $stock->save();
                     }
-                    
+
                     // Delete the now-empty duplicate master stock
                     if ($masterStock->image) {
                         Storage::disk('public')->delete($masterStock->image);
                     }
                     $masterStock->forceDelete();
                 }
-                
+
                 $cleaned++;
-                
+
                 Log::channel('daily')->info('Duplicate master stock cleaned up', [
                     'user_id' => auth()->id() ?? 'system',
                     'sku' => $duplicate->sku,
@@ -1004,28 +1090,28 @@ class StockController extends Controller
                     'sku' => $duplicate->sku,
                     'error' => $e->getMessage()
                 ];
-                
+
                 Log::channel('daily')->error('Error cleaning up duplicate master stock', [
                     'sku' => $duplicate->sku,
                     'error' => $e->getMessage()
                 ]);
             }
         }
-        
+
         return [
             'success' => count($errors) === 0,
             'cleaned' => $cleaned,
             'errors' => $errors
         ];
     }
-    
+
     /**
      * Admin route to manually trigger cleanup of duplicate master stocks
      */
     public function runCleanupDuplicates()
     {
         $result = $this->cleanupDuplicateMasterStocks();
-        
+
         if ($result['success']) {
             return redirect()->route('stocks.index')->with([
                 'success' => true,
