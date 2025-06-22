@@ -183,11 +183,17 @@ class StockController extends Controller
             'size.*' => 'required',
             'purchase_price.*' => 'required|numeric|min:0',
             'selling_price.*' => 'required|numeric|min:0',
-            'quantity.*' => 'required|integer|min:1',
+            'quantity.*' => 'required|integer|min:1', // Pastikan min:1
             'expiration_date.*' => 'required|date',
-            'retail_price.*' => 'nullable',
-            'retail_quantity.*' => 'nullable',
+            'retail_price.*' => 'nullable|numeric|min:0',
+            'retail_quantity.*' => 'nullable|integer|min:0',
             'sub_type.*' => 'nullable',
+        ]);
+
+        // Debug: Log data yang diterima
+        Log::info('Stock creation data received:', [
+            'quantities' => $validated['quantity'],
+            'names' => $validated['name']
         ]);
 
         // Initialize total variable
@@ -208,6 +214,13 @@ class StockController extends Controller
             $purchasePrice = $validated['purchase_price'][$i];
             $quantity = $validated['quantity'][$i];
 
+            // Validasi tambahan untuk memastikan quantity > 0
+            if ($quantity <= 0) {
+                return back()->withErrors([
+                    "quantity.$i" => "Jumlah stok harus lebih dari 0"
+                ])->withInput();
+            }
+
             // Calculate total for the current item and add it to the total
             $total += $purchasePrice * $quantity;
         }
@@ -220,7 +233,7 @@ class StockController extends Controller
         for ($i = 0; $i < count($validated['name']); $i++) {
             // Access the validated data for each item in the array
             $name = $validated['name'][$i];
-            $image = $validated['image'][$i] ?? null; // Image is nullable
+            $image = $validated['image'][$i] ?? null;
             $description = $validated['description'][$i] ?? null;
             $type = $validated['type'][$i];
             $sub_type = $validated['sub_type'][$i] ?? null;
@@ -232,6 +245,26 @@ class StockController extends Controller
             $retail_price = $validated['retail_price'][$i] ?? null;
             $retail_quantity = $validated['retail_quantity'][$i] ?? null;
 
+            // Debug log untuk setiap item
+            Log::info("Processing item $i:", [
+                'name' => $name,
+                'quantity' => $quantity,
+                'type' => gettype($quantity),
+                'is_numeric' => is_numeric($quantity),
+                'intval' => intval($quantity)
+            ]);
+
+            // Konversi quantity ke integer untuk memastikan
+            $quantity = intval($quantity);
+
+            if ($quantity <= 0) {
+                Log::error("Invalid quantity for item $i:", [
+                    'original_quantity' => $validated['quantity'][$i],
+                    'converted_quantity' => $quantity
+                ]);
+                continue; // Skip item ini jika quantity invalid
+            }
+
             // Add product info to arrays for session
             $productNames[] = $name;
             $productTypes[] = $type;
@@ -239,24 +272,22 @@ class StockController extends Controller
             $productQuantities[] = $quantity;
             $productPrices[] = $selling_price;
 
-            if ($request->hasFile("image.$i")) {  // Check for each individual file
+            if ($request->hasFile("image.$i")) {
                 $imagePath = $request->file("image.$i")->store('stocks', 'public');
-                // Store the image path in the validated data
                 $validated['image'][$i] = $imagePath;
             }
 
             // Generate SKU using the new format
             $sku = IdGenerator::generateSku($name, $type, $sub_type);
 
-            // Cek existing master stock berdasarkan SKU (including soft-deleted)
+            // Check existing master stock by SKU
             $existingMasterStock = MasterStock::withTrashed()->where('sku', $sku)->first();
 
             // Create or get master stock
             if ($existingMasterStock) {
-                // If master stock exists but is soft-deleted, restore it
                 if ($existingMasterStock->trashed()) {
                     $existingMasterStock->restore();
-                    Log::channel('daily')->info('Master stock restored during creation', [
+                    Log::info('Master stock restored during creation', [
                         'user_id' => auth()->id() ?? 'system',
                         'master_stock_id' => $existingMasterStock->id,
                         'name' => $name,
@@ -267,7 +298,6 @@ class StockController extends Controller
                 $masterStockId = $existingMasterStock->id;
 
                 if ($request->hasFile("image.$i")) {
-                    // Hapus gambar lama jika ada
                     if ($existingMasterStock->image) {
                         Storage::disk('public')->delete($existingMasterStock->image);
                     }
@@ -278,20 +308,19 @@ class StockController extends Controller
                 $existingMasterStock->save();
                 $masterStock = $existingMasterStock;
             } else {
-                // Create a new master stock dengan SKU baru
                 $masterStock = MasterStock::create([
                     'name' => $name,
                     'image' => $validated['image'][$i] ?? null,
                     'description' => $description,
                     'type' => $type,
                     'sub_type' => $sub_type,
-                    'sku' => $sku, // Gunakan SKU yang sudah di-generate
+                    'sku' => $sku,
                 ]);
 
                 $masterStockId = $masterStock->id;
             }
 
-            // PERBAIKAN: Gunakan helper method untuk pencarian stok existing
+            // Find existing stock
             $existingStock = $this->findExistingStock($masterStockId, $size, $expiration_date);
 
             if ($existingStock) {
@@ -299,39 +328,42 @@ class StockController extends Controller
                     // Restore dan update stok yang telah dihapus
                     $existingStock->restore();
 
-                    // Update prices first
                     $existingStock->purchase_price = $purchase_price;
                     $existingStock->selling_price = $selling_price;
                     $existingStock->retail_price = $retail_price;
-                    $existingStock->retail_quantity = ($existingStock->retail_quantity ?? 0) + ($retail_quantity ?? 0);
 
-                    // Use the new method for proper notification handling
+                    // Tambah retail_quantity jika ada
+                    if ($retail_quantity !== null) {
+                        $existingStock->retail_quantity = ($existingStock->retail_quantity ?? 0) + $retail_quantity;
+                    }
+
+                    // Update quantity dengan pengecekan ketat
+                    $oldQuantity = $existingStock->quantity;
+                    $newQuantity = $oldQuantity + $quantity;
+
+                    Log::info('Stock restore and update:', [
+                        'stock_id' => $existingStock->stock_id,
+                        'old_quantity' => $oldQuantity,
+                        'added_quantity' => $quantity,
+                        'new_quantity' => $newQuantity
+                    ]);
+
                     $this->updateStockWithNotificationHandling(
                         $existingStock,
-                        $existingStock->quantity + $quantity,
+                        $newQuantity,
                         $quantity
                     );
 
-                    // Also check if master stock is soft-deleted and restore it
+                    // Check master stock restore
                     $masterStockCheck = MasterStock::withTrashed()->find($existingStock->master_stock_id);
                     if ($masterStockCheck && $masterStockCheck->trashed()) {
                         $masterStockCheck->restore();
-                        Log::channel('daily')->info('Master stock restored due to stock restore', [
-                            'user_id' => auth()->id() ?? 'system',
-                            'master_stock_id' => $masterStockCheck->id,
-                            'name' => $masterStockCheck->name
-                        ]);
                     }
-
-                    Log::channel('daily')->info('Stock restored and updated', [
-                        'stock_id' => $existingStock->stock_id,
-                        'added_quantity' => $quantity,
-                        'new_total_quantity' => $existingStock->quantity
-                    ]);
                 } else {
                     // Update stok yang sudah ada
                     $existingStock->purchase_price = $purchase_price;
                     $existingStock->selling_price = $selling_price;
+
                     if ($retail_price !== null) {
                         $existingStock->retail_price = $retail_price;
                     }
@@ -339,23 +371,26 @@ class StockController extends Controller
                         $existingStock->retail_quantity = ($existingStock->retail_quantity ?? 0) + $retail_quantity;
                     }
 
-                    // Use the new method for proper notification handling
+                    // Update quantity dengan logging
+                    $oldQuantity = $existingStock->quantity;
+                    $newQuantity = $oldQuantity + $quantity;
+
+                    Log::info('Stock quantity update:', [
+                        'stock_id' => $existingStock->stock_id,
+                        'old_quantity' => $oldQuantity,
+                        'added_quantity' => $quantity,
+                        'new_quantity' => $newQuantity
+                    ]);
+
                     $this->updateStockWithNotificationHandling(
                         $existingStock,
-                        $existingStock->quantity + $quantity,
+                        $newQuantity,
                         $quantity
                     );
-
-                    Log::channel('daily')->info('Stock quantity updated', [
-                        'stock_id' => $existingStock->stock_id,
-                        'added_quantity' => $quantity,
-                        'new_total_quantity' => $existingStock->quantity
-                    ]);
                 }
 
                 $this->createPembelian($existingStock, $quantity, $purchase_price, $expiration_date, $master_pembelian);
 
-                // Log existing stock update
                 $logData[] = [
                     'action' => 'update_stock',
                     'stock_id' => $existingStock->stock_id,
@@ -367,11 +402,57 @@ class StockController extends Controller
                     'selling_price' => $selling_price,
                     'expiration_date' => $expiration_date
                 ];
+            } else {
+                // Create new stock - case yang mungkin terlewat dalam kode asli
+                $batchNumber = Stock::withTrashed()
+                    ->where('master_stock_id', $masterStockId)
+                    ->where('size', $size)
+                    ->count() + 1;
+
+                $stockId = IdGenerator::generateStockId(
+                    $sku,
+                    $size,
+                    $expiration_date,
+                    $batchNumber
+                );
+
+                $newStock = Stock::create([
+                    'master_stock_id' => $masterStockId,
+                    'size' => $size,
+                    'purchase_price' => $purchase_price,
+                    'selling_price' => $selling_price,
+                    'quantity' => $quantity,
+                    'retail_price' => $retail_price,
+                    'retail_quantity' => $retail_quantity,
+                    'expiration_date' => $expiration_date,
+                    'stock_id' => $stockId,
+                ]);
+
+                Log::info('New stock created:', [
+                    'stock_id' => $newStock->stock_id,
+                    'quantity' => $newStock->quantity,
+                    'name' => $name
+                ]);
+
+                $newStock->checkAndCreateNotifications();
+                $this->createPembelian($newStock, $quantity, $purchase_price, $expiration_date, $master_pembelian);
+
+                $logData[] = [
+                    'action' => 'create_stock',
+                    'stock_id' => $newStock->stock_id,
+                    'name' => $name,
+                    'type' => $type,
+                    'size' => $size,
+                    'quantity' => $quantity,
+                    'purchase_price' => $purchase_price,
+                    'selling_price' => $selling_price,
+                    'expiration_date' => $expiration_date
+                ];
             }
         }
 
-        // Log all stock creation/update data
-        Log::channel('daily')->info('Stock created/updated', [
+        // Log all operations
+        Log::info('Stock operation completed', [
             'user_id' => auth()->id() ?? 'system',
             'master_pembelian_id' => $master_pembelian->id,
             'total' => $total,
@@ -380,13 +461,11 @@ class StockController extends Controller
 
         return redirect()->route('stocks.create')->with([
             'success' => 'Stok berhasil ditambahkan!',
-            // Store all product info in session
             'product_names' => $productNames,
             'product_types' => $productTypes,
             'product_sizes' => $productSizes,
             'product_quantities' => $productQuantities,
             'product_prices' => $productPrices,
-            // Also keep the last item for backward compatibility
             'product_name' => end($productNames),
             'product_type' => end($productTypes),
             'product_size' => end($productSizes),
