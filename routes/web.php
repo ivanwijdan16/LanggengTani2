@@ -69,9 +69,16 @@ Route::middleware('auth')->group(function () {
     Route::post('/cart/{id}', [CartController::class, 'removeFromCart']);
 
     // Notifications (semua user dapat akses)
-    Route::get('/notifications', [NotificationController::class, 'getNotifications']);
-    Route::post('/notifications/{id}/markAsRead', [NotificationController::class, 'markAsRead']);
-    Route::get('/notifications/all', [NotificationController::class, 'index'])->name('notifications.all');
+    Route::prefix('notifications')->group(function () {
+        Route::get('/', [NotificationController::class, 'getNotifications']);
+        Route::post('/{id}/markAsRead', [NotificationController::class, 'markAsRead']);
+        Route::get('/all', [NotificationController::class, 'index'])->name('notifications.all');
+
+        // Route tambahan untuk management notifikasi
+        Route::post('/mark-all-read', [NotificationController::class, 'markAllAsRead'])->name('notifications.mark-all-read');
+        Route::delete('/delete-old', [NotificationController::class, 'deleteOld'])->name('notifications.delete-old');
+        Route::get('/statistics', [NotificationController::class, 'getStatistics'])->name('notifications.statistics');
+    });
 
     // Dokumentasi
     Route::get('/dokumentasi', [DokumentasiController::class, 'index'])->name('dokumentasi');

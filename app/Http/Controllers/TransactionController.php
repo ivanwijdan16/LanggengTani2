@@ -80,6 +80,8 @@ class TransactionController extends Controller
             foreach ($stocks as $stock) {
                 if ($remainingQuantity <= 0) break;
 
+                $oldQuantity = $stock->quantity; // Store old quantity for notification handling
+
                 if ($cart->type == 'normal') {
                     $availableQuantity = $stock->quantity;
                     $quantityToTake = min($availableQuantity, $remainingQuantity);
@@ -92,8 +94,9 @@ class TransactionController extends Controller
                         'subtotal' => $quantityToTake * $price
                     ]);
 
-                    // Kurangi stok
-                    $stock->quantity -= $quantityToTake;
+                    // Update stock quantity
+                    $newQuantity = $stock->quantity - $quantityToTake;
+                    $stock->quantity = $newQuantity;
                     $remainingQuantity -= $quantityToTake;
                 } else {
                     $availableQuantity = $stock->retail_quantity;
@@ -107,17 +110,15 @@ class TransactionController extends Controller
                         'subtotal' => $quantityToTake * $price
                     ]);
 
-                    // Kurangi stok eceran
+                    // Update retail stock quantity
                     $stock->retail_quantity -= $quantityToTake;
                     $remainingQuantity -= $quantityToTake;
                 }
 
                 $stock->save();
 
-                // Jika method checkAndCreateNotifications ada
-                if (method_exists($stock, 'checkAndCreateNotifications')) {
-                    $stock->checkAndCreateNotifications();
-                }
+                // UPDATED: Handle notifications properly after stock reduction
+                $this->handleStockNotificationsAfterSale($stock, $oldQuantity);
             }
         }
 
@@ -143,5 +144,23 @@ class TransactionController extends Controller
 
         // Tampilkan view success dengan data transaksi
         return view('transaction.success', compact('transaction'));
+    }
+
+    private function handleStockNotificationsAfterSale($stock, $oldQuantity)
+    {
+        // If stock quantity changed, check for new notifications
+        if ($oldQuantity != $stock->quantity) {
+            // Clear old notifications that might no longer be relevant
+            if ($oldQuantity > 5 && $stock->quantity <= 5) {
+                // Stock just became low, clear any out_of_stock notifications
+                $stock->markNotificationsAsResolved('out_of_stock');
+            } elseif ($oldQuantity > 0 && $stock->quantity <= 0) {
+                // Stock just became out of stock, clear low_stock notifications
+                $stock->markNotificationsAsResolved('low_stock');
+            }
+
+            // Create new notifications based on current conditions
+            $stock->checkAndCreateNotifications();
+        }
     }
 }

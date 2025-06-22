@@ -115,6 +115,87 @@
             border: none;
         }
 
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.35rem 0.75rem;
+            border-radius: 50px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: white;
+            position: absolute;
+            top: 10px;
+            z-index: 10;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+        }
+
+        .out-of-stock {
+            left: 10px;
+            background-color: #ef4444;
+        }
+
+        .stock-minimal {
+            left: 10px;
+            background-color: #FF9800;
+        }
+
+        .nearly-expired {
+            right: 10px;
+            background-color: #FF9800;
+        }
+
+        .expired {
+            right: 10px;
+            background-color: #ef4444;
+        }
+
+        .status-badge i {
+            margin-right: 4px;
+            font-size: 0.8rem;
+        }
+
+        /* Update stock quantity badge untuk menunjukkan status */
+        .stock-quantity-badge {
+            background-color: #ecfdf5;
+            color: #0f766e;
+            border: 1px solid #d1fae5;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .stock-quantity-badge i {
+            color: #10b981;
+            margin-right: 5px;
+            font-size: 0.8rem;
+        }
+
+        /* Status khusus untuk stok habis */
+        .stock-quantity-badge.bg-danger {
+            background-color: #fee2e2 !important;
+            color: #dc2626 !important;
+            border-color: #fecaca !important;
+        }
+
+        .stock-quantity-badge.bg-danger i {
+            color: #dc2626 !important;
+        }
+
+        /* Status khusus untuk stok menipis */
+        .stock-quantity-badge.bg-warning {
+            background-color: #fef3c7 !important;
+            color: #d97706 !important;
+            border-color: #fde68a !important;
+        }
+
+        .stock-quantity-badge.bg-warning i {
+            color: #d97706 !important;
+        }
+
         .stock-card .btn-delete:hover {
             background-color: #ef4444;
             color: white;
@@ -641,7 +722,7 @@
                     $almostExpired =
                         !$expired && \Carbon\Carbon::parse($stock->expiration_date)->diffInDays(now()) < 30;
                     $lowStock = $stock->quantity <= 5 && $stock->quantity > 0; // Stok menipis jika <= 5 tapi > 0
-                    $outOfStock = $stock->quantity == 0; // Stok habis jika = 0
+                    $outOfStock = $stock->quantity <= 0; // Stok habis jika <= 0
                     $sizeImagePath =
                         isset($sizeImage) && $sizeImage && $sizeImage->image ? $sizeImage->image : $masterStock->image;
                     $image = $sizeImagePath ? asset('storage/' . $sizeImagePath) : asset('images/default.png');

@@ -298,12 +298,19 @@ class StockController extends Controller
                 if ($existingStock->trashed()) {
                     // Restore dan update stok yang telah dihapus
                     $existingStock->restore();
-                    $existingStock->quantity += $quantity;
+
+                    // Update prices first
                     $existingStock->purchase_price = $purchase_price;
                     $existingStock->selling_price = $selling_price;
                     $existingStock->retail_price = $retail_price;
                     $existingStock->retail_quantity = ($existingStock->retail_quantity ?? 0) + ($retail_quantity ?? 0);
-                    $existingStock->save();
+
+                    // Use the new method for proper notification handling
+                    $this->updateStockWithNotificationHandling(
+                        $existingStock,
+                        $existingStock->quantity + $quantity,
+                        $quantity
+                    );
 
                     // Also check if master stock is soft-deleted and restore it
                     $masterStockCheck = MasterStock::withTrashed()->find($existingStock->master_stock_id);
@@ -323,7 +330,6 @@ class StockController extends Controller
                     ]);
                 } else {
                     // Update stok yang sudah ada
-                    $existingStock->quantity += $quantity;
                     $existingStock->purchase_price = $purchase_price;
                     $existingStock->selling_price = $selling_price;
                     if ($retail_price !== null) {
@@ -332,7 +338,13 @@ class StockController extends Controller
                     if ($retail_quantity !== null) {
                         $existingStock->retail_quantity = ($existingStock->retail_quantity ?? 0) + $retail_quantity;
                     }
-                    $existingStock->save();
+
+                    // Use the new method for proper notification handling
+                    $this->updateStockWithNotificationHandling(
+                        $existingStock,
+                        $existingStock->quantity + $quantity,
+                        $quantity
+                    );
 
                     Log::channel('daily')->info('Stock quantity updated', [
                         'stock_id' => $existingStock->stock_id,
@@ -347,47 +359,6 @@ class StockController extends Controller
                 $logData[] = [
                     'action' => 'update_stock',
                     'stock_id' => $existingStock->stock_id,
-                    'name' => $name,
-                    'type' => $type,
-                    'size' => $size,
-                    'quantity' => $quantity,
-                    'purchase_price' => $purchase_price,
-                    'selling_price' => $selling_price,
-                    'expiration_date' => $expiration_date
-                ];
-            } else {
-                // PERBAIKAN: Gunakan helper method untuk generate batch number
-                $batchNumber = $this->generateBatchNumber($masterStockId, $size, $expiration_date);
-
-                // Generate stock ID
-                $stockId = IdGenerator::generateStockId($sku, $size, $expiration_date, $batchNumber);
-
-                // Buat stok baru
-                $stock = Stock::create([
-                    'master_stock_id' => $masterStockId,
-                    'size' => $size,
-                    'purchase_price' => $purchase_price,
-                    'selling_price' => $selling_price,
-                    'quantity' => $quantity,
-                    'expiration_date' => $expiration_date,
-                    'retail_price' => $retail_price,
-                    'retail_quantity' => $retail_quantity,
-                    'stock_id' => $stockId,
-                ]);
-
-                $stock->checkAndCreateNotifications();
-                $this->createPembelian($stock, $quantity, $purchase_price, $expiration_date, $master_pembelian);
-
-                Log::channel('daily')->info('New stock created', [
-                    'stock_id' => $stock->stock_id,
-                    'batch_number' => $batchNumber,
-                    'quantity' => $quantity
-                ]);
-
-                // Log new stock creation
-                $logData[] = [
-                    'action' => 'create_stock',
-                    'stock_id' => $stock->stock_id,
                     'name' => $name,
                     'type' => $type,
                     'size' => $size,
@@ -469,8 +440,13 @@ class StockController extends Controller
                 $existingStock->restore();
                 $existingStock->purchase_price = $validated['purchase_price'];
                 $existingStock->selling_price = $validated['selling_price'];
-                $existingStock->quantity += $validated['quantity'];  // Tambahkan quantity
-                $existingStock->save();
+
+                // Use the new method for proper notification handling
+                $this->updateStockWithNotificationHandling(
+                    $existingStock,
+                    $existingStock->quantity + $validated['quantity'],
+                    $validated['quantity']
+                );
 
                 // Also check if master stock is soft-deleted and restore it
                 $masterStockCheck = MasterStock::withTrashed()->find($existingStock->master_stock_id);
@@ -486,10 +462,6 @@ class StockController extends Controller
                 // Create pembelian record
                 $this->createPembelian($existingStock, $validated['quantity'], $validated['purchase_price'], $validated['expiration_date'], $master_pembelian);
 
-                // Check for notifications
-                $existingStock->checkAndCreateNotifications();
-
-                // Log stock size restore
                 Log::channel('daily')->info('Stock size restored', [
                     'user_id' => auth()->id() ?? 'system',
                     'master_stock_id' => $masterStock->id,
@@ -505,18 +477,19 @@ class StockController extends Controller
                 $stock = $existingStock;
             } else {
                 // If stock exists but isn't deleted, update quantity and prices
-                $existingStock->quantity += $validated['quantity'];
-                $existingStock->purchase_price = $validated['purchase_price'];  // Update harga beli
-                $existingStock->selling_price = $validated['selling_price'];   // Update harga jual
-                $existingStock->save();
+                $existingStock->purchase_price = $validated['purchase_price'];
+                $existingStock->selling_price = $validated['selling_price'];
+
+                // Use the new method for proper notification handling
+                $this->updateStockWithNotificationHandling(
+                    $existingStock,
+                    $existingStock->quantity + $validated['quantity'],
+                    $validated['quantity']
+                );
 
                 // Create pembelian record
                 $this->createPembelian($existingStock, $validated['quantity'], $validated['purchase_price'], $validated['expiration_date'], $master_pembelian);
 
-                // Check for notifications
-                $existingStock->checkAndCreateNotifications();
-
-                // Log stock size update
                 Log::channel('daily')->info('Stock size quantity updated', [
                     'user_id' => auth()->id() ?? 'system',
                     'master_stock_id' => $masterStock->id,
@@ -533,48 +506,6 @@ class StockController extends Controller
 
                 $stock = $existingStock;
             }
-        } else {
-            // PERBAIKAN: Gunakan helper method untuk generate batch number
-            $batchNumber = $this->generateBatchNumber($validated['master_stock_id'], $validated['size'], $validated['expiration_date']);
-
-            // Generate stock ID
-            $stockId = IdGenerator::generateStockId(
-                $masterStock->sku,
-                $validated['size'],
-                $validated['expiration_date'],
-                $batchNumber
-            );
-
-            // Create stock
-            $stock = Stock::create([
-                'master_stock_id' => $validated['master_stock_id'],
-                'size' => $validated['size'],
-                'purchase_price' => $validated['purchase_price'],
-                'selling_price' => $validated['selling_price'],
-                'quantity' => $validated['quantity'],
-                'expiration_date' => $validated['expiration_date'],
-                'stock_id' => $stockId,
-            ]);
-
-            // Create pembelian record
-            $this->createPembelian($stock, $validated['quantity'], $validated['purchase_price'], $validated['expiration_date'], $master_pembelian);
-
-            // Check for notifications
-            $stock->checkAndCreateNotifications();
-
-            // Log stock size creation
-            Log::channel('daily')->info('Stock size created', [
-                'user_id' => auth()->id() ?? 'system',
-                'master_stock_id' => $masterStock->id,
-                'master_stock_name' => $masterStock->name,
-                'master_pembelian_id' => $master_pembelian->id,
-                'stock_id' => $stock->stock_id,
-                'size' => $validated['size'],
-                'quantity' => $validated['quantity'],
-                'purchase_price' => $validated['purchase_price'],
-                'selling_price' => $validated['selling_price'],
-                'expiration_date' => $validated['expiration_date']
-            ]);
         }
 
         return redirect()->route('stocks.sizes', $validated['master_stock_id'])->with([
@@ -1134,5 +1065,29 @@ class StockController extends Controller
         return Stock::where('master_stock_id', $masterStockId)
             ->whereNull('deleted_at')  // Only include non-deleted stocks
             ->sum('quantity');
+    }
+
+    private function updateStockWithNotificationHandling($stock, $newQuantity, $addedQuantity = 0)
+    {
+        $oldQuantity = $stock->quantity;
+        $stock->quantity = $newQuantity;
+
+        // Check for improved conditions before updating
+        if ($oldQuantity <= 0 && $newQuantity > 0) {
+            // Stock was out but now has quantity - mark out_of_stock notifications as resolved
+            $stock->markNotificationsAsResolved('out_of_stock');
+        }
+
+        if ($oldQuantity <= 5 && $newQuantity > 5) {
+            // Stock was low but now above threshold - mark low_stock notifications as resolved
+            $stock->markNotificationsAsResolved('low_stock');
+        }
+
+        $stock->save();
+
+        // Create new notifications based on current conditions
+        $stock->checkAndCreateNotifications();
+
+        return $stock;
     }
 }
