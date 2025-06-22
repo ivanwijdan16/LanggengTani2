@@ -32,6 +32,47 @@
             transform: scale(1.08);
         }
 
+        /* Status Badges */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.35rem 0.75rem;
+            border-radius: 50px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: white;
+            position: absolute;
+            top: 10px;
+            z-index: 10;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+        }
+
+        .stock-out {
+            left: 10px;
+            background-color: #ef4444;
+        }
+
+        .stock-minimal {
+            left: 10px;
+            background-color: #FF9800;
+        }
+
+        .nearly-expired {
+            right: 10px;
+            background-color: #FF9800;
+        }
+
+        .expired {
+            right: 10px;
+            background-color: #ef4444;
+        }
+
+        .status-badge i {
+            margin-right: 4px;
+            font-size: 0.8rem;
+        }
+
         .stock-badge {
             font-size: 0.75rem;
             padding: 0.35rem 0.65rem;
@@ -845,12 +886,46 @@
                 @php
                     $image = $stock->image ? asset('storage/' . $stock->image) : asset('images/default.png');
                     $totalQuantity = $stockQuantities[$stock->id] ?? 0;
+                    $lowStock = $totalQuantity <= 5 && $totalQuantity > 0;
+                    $stockOut = $totalQuantity <= 0;
+
+                    // Check if any stock batches are expired
+                    $hasExpired = false;
+
+                    $allStocks = \App\Models\Stock::where('master_stock_id', $stock->id)
+                        ->whereNull('deleted_at')
+                        ->get();
+
+                    foreach ($allStocks as $stockItem) {
+                        $expiredCheck = \Carbon\Carbon::parse($stockItem->expiration_date)->isPast();
+
+                        if ($expiredCheck) {
+                            $hasExpired = true;
+                            break;
+                        }
+                    }
                 @endphp
                 <div class="col-xl-3 col-lg-4 col-md-6 mb-4">
                     <div class="card stock-card" data-id="{{ $stock->id }}"
                         onclick="viewStockSizes({{ $stock->id }})" style="cursor: pointer;">
                         <div class="card-img-wrapper">
                             <img src="{{ $image }}" class="card-img-top" alt="{{ $stock->name }}">
+
+                            @if ($stockOut)
+                                <span class="status-badge stock-out">
+                                    <i class="bx bx-x-circle"></i> Stok Habis
+                                </span>
+                            @elseif($lowStock)
+                                <span class="status-badge stock-minimal">
+                                    <i class="bx bx-package"></i> Stok Menipis
+                                </span>
+                            @endif
+
+                            @if ($hasExpired)
+                                <span class="status-badge expired">
+                                    <i class="bx bx-x-circle"></i> Ada Kadaluwarsa
+                                </span>
+                            @endif
                         </div>
 
                         <div class="card-body">

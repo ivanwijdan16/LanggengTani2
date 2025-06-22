@@ -132,7 +132,7 @@
           </li>
 
           @if (auth()->user()->role == 'owner')
-      <li class="menu-item">
+<li class="menu-item">
         <a href="{{ route('pembelian.index') }}" class="menu-link">
         <!-- Changed the icon to a shopping cart icon (for purchases) -->
         <i class="menu-icon tf-icons bx bx-store"></i>
@@ -163,7 +163,7 @@
         <div data-i18n="Pegawai">Pegawai</div>
         </a>
         </li>
-    @endif
+@endif
 
 <li class="menu-item">
     <a href="https://langgengtani.gitbook.io/langgengtani/" class="menu-link" target="_blank">
@@ -221,7 +221,7 @@
                 </a>
                 <ul class="dropdown-menu dropdown-menu-end">
                   @if (auth()->user()->role == 'owner')
-          <li>
+<li>
             <a class="dropdown-item" href="{{ route('profile.edit') }}">
               <i class="bx bx-user me-2"></i>
               <span class="align-middle">My Profile</span>
@@ -230,7 +230,7 @@
             <li>
             <div class="dropdown-divider"></div>
             </li>
-        @endif
+@endif
                   <li>
                     <form id="logout-form" action="{{ route('logout') }}" method="POST" style="display: none;">
                       @csrf
@@ -316,69 +316,108 @@
   <script src="{{ asset('assets/js/main.js') }}"></script>
 
   <script>
-    $(document).ready(function () {
-      // Fetch notifications using Ajax
-      function loadNotifications() {
-        $.ajax({
-          url: '/notifications',
-          method: 'GET',
-          success: function (response) {
-            // Update the badge with the count of unread notifications
-            $('#notificationBadge').text(response.unread_count);
+      $(document).ready(function() {
+          // Fetch notifications using Ajax
+          function loadNotifications() {
+              $.ajax({
+                  url: '/notifications',
+                  method: 'GET',
+                  success: function(response) {
+                      // Update the badge with the count of unread notifications
+                      $('#notificationBadge').text(response.unread_count);
 
-            // Clear existing notifications
-            $('#notificationDropdown .dropdown-menu').empty();
+                      // Clear existing notifications
+                      $('#notificationDropdown .dropdown-menu').empty();
 
-            if (response.notifications.length > 0) {
-              response.notifications.forEach(function (notification) {
-                $('#notificationDropdown .dropdown-menu').append(`
-                            <li>
-                                <a class="dropdown-item mark-as-read" href="#" data-id="${notification.id}">
-                                    <i class="bx bx-bell me-2"></i>
-                                    <span class="align-middle">${notification.message}</span>
-                                </a>
-                            </li>
-                        `);
-              });
-            } else {
-              $('#notificationDropdown .dropdown-menu').append(`
+                      if (response.notifications.length > 0) {
+                          response.notifications.forEach(function(notification) {
+                              // Check if notification is clickable (has stock relationship)
+                              const isClickable = notification.stock && notification.stock
+                                  .master_stock;
+                              const clickHandler = isClickable ?
+                                  `onclick="handleDropdownNotificationClick(${notification.id}, event)"` :
+                                  '';
+                              const cursorStyle = isClickable ? 'cursor: pointer;' : '';
+
+                              $('#notificationDropdown .dropdown-menu').append(`
+                    <li>
+                        <a class="dropdown-item notification-dropdown-item" href="#"
+                           data-id="${notification.id}"
+                           ${clickHandler}
+                           style="${cursorStyle}">
+                            <i class="bx bx-bell me-2"></i>
+                            <span class="align-middle">${notification.message}</span>
+                            ${!notification.read ? '<span class="badge bg-primary ms-2">Baru</span>' : ''}
+                        </a>
+                    </li>
+                `);
+                          });
+                      } else {
+                          $('#notificationDropdown .dropdown-menu').append(`
                         <li><a class="dropdown-item" href="#">No notifications</a></li>
                     `);
-            }
+                      }
 
-            $('#notificationDropdown .dropdown-menu').append(`
-    <li>
-        <div class="dropdown-divider"></div>
-    </li>
-    <li>
-        <a class="dropdown-item" href="{{ route('notifications.all') }}">Lihat Semua Notifikasi</a>
-    </li>
-`);
+                      $('#notificationDropdown .dropdown-menu').append(`
+                <li>
+                    <div class="dropdown-divider"></div>
+                </li>
+                <li>
+                    <a class="dropdown-item" href="{{ route('notifications.all') }}">Lihat Semua Notifikasi</a>
+                </li>
+            `);
+                  }
+              });
           }
-        });
-      }
 
-      // Load notifications when the page loads
-      loadNotifications();
+          // Load notifications when the page loads
+          loadNotifications();
 
-      // Optionally, refresh notifications periodically
-      setInterval(loadNotifications, 60000); // Refresh every minute
+          // Optionally, refresh notifications periodically
+          setInterval(loadNotifications, 60000); // Refresh every minute
 
-      // Mark notification as read when clicked
-      $(document).on('click', '.mark-as-read', function (e) {
-        var notificationId = $(this).data('id');
-        $.ajax({
-          url: '/notifications/' + notificationId + '/markAsRead',
-          method: 'POST',
-          data: {
-            _token: '{{ csrf_token() }}'
-          },
-          success: function () {
-            loadNotifications();
-          }
-        });
+          // Handle notification click in dropdown
+          window.handleDropdownNotificationClick = function(notificationId, event) {
+              event.preventDefault();
+
+              // Mark notification as read and get redirect URL
+              $.ajax({
+                  url: '/notifications/' + notificationId + '/markAsRead',
+                  method: 'POST',
+                  data: {
+                      _token: '{{ csrf_token() }}'
+                  },
+                  success: function(response) {
+                      if (response.status === 'success' && response.redirect_url) {
+                          // Redirect to the stock batches page
+                          window.location.href = response.redirect_url;
+                      } else {
+                          // Fallback - just reload notifications
+                          loadNotifications();
+                      }
+                  },
+                  error: function() {
+                      // Fallback - just reload notifications
+                      loadNotifications();
+                  }
+              });
+          };
+
+          // Mark notification as read when clicked (legacy handler for non-clickable notifications)
+          $(document).on('click', '.notification-dropdown-item:not([onclick])', function(e) {
+              var notificationId = $(this).data('id');
+              $.ajax({
+                  url: '/notifications/' + notificationId + '/markAsRead',
+                  method: 'POST',
+                  data: {
+                      _token: '{{ csrf_token() }}'
+                  },
+                  success: function() {
+                      loadNotifications();
+                  }
+              });
+          });
       });
-    });
   </script>
 
   @yield('script')

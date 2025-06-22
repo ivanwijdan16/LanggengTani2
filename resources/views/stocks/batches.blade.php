@@ -640,7 +640,8 @@
                     $expired = \Carbon\Carbon::parse($stock->expiration_date)->isPast();
                     $almostExpired =
                         !$expired && \Carbon\Carbon::parse($stock->expiration_date)->diffInDays(now()) < 30;
-                    $lowStock = $stock->quantity <= 3;
+                    $lowStock = $stock->quantity <= 5 && $stock->quantity > 0; // Stok menipis jika <= 5 tapi > 0
+                    $outOfStock = $stock->quantity == 0; // Stok habis jika = 0
                     $sizeImagePath =
                         isset($sizeImage) && $sizeImage && $sizeImage->image ? $sizeImage->image : $masterStock->image;
                     $image = $sizeImagePath ? asset('storage/' . $sizeImagePath) : asset('images/default.png');
@@ -651,12 +652,18 @@
                             <img src="{{ $image }}" class="card-img-top"
                                 alt="{{ $masterStock->name }} - {{ $size }}">
 
-                            @if ($lowStock)
+                            {{-- Badge untuk stok --}}
+                            @if ($outOfStock)
+                                <span class="status-badge out-of-stock">
+                                    <i class="bx bx-x-circle"></i> Stok Habis
+                                </span>
+                            @elseif ($lowStock)
                                 <span class="status-badge stock-minimal">
                                     <i class="bx bx-package"></i> Stok Menipis
                                 </span>
                             @endif
 
+                            {{-- Badge untuk kadaluwarsa --}}
                             @if ($expired)
                                 <span class="status-badge expired">
                                     <i class="bx bx-x-circle"></i> Kadaluwarsa
@@ -673,7 +680,8 @@
 
                             <div class="d-flex justify-content-between align-items-center mb-2 mt-2">
                                 <h6 class="card-subtitle mb-0">{{ $stock->stock_id }}</h6>
-                                <span class="stock-quantity-badge">
+                                <span
+                                    class="stock-quantity-badge {{ $outOfStock ? 'bg-danger text-white border-danger' : ($lowStock ? 'bg-warning text-dark border-warning' : '') }}">
                                     <i class="bx bx-package"></i> {{ $stock->quantity }} pcs
                                 </span>
                             </div>
@@ -721,127 +729,126 @@
                 </div>
             @endforelse
         </div>
-    </div>
 
-    <!-- Delete Stock Modal -->
-    <div class="delete-modal-backdrop" id="deleteStockModal">
-        <div class="delete-modal-dialog">
-            <div class="delete-modal-content">
-                <div class="delete-modal-header">
-                    <h5 class="delete-modal-title">
-                        <i class="bx bx-error-circle"></i> Konfirmasi Hapus
-                    </h5>
-                </div>
-                <div class="delete-modal-body">
-                    <p>Apakah Anda yakin ingin menghapus stok ini?</p>
-                    <div class="delete-modal-product" id="deleteStockProduct">
-                        <!-- Stock info will be inserted here -->
+        <!-- Delete Stock Modal -->
+        <div class="delete-modal-backdrop" id="deleteStockModal">
+            <div class="delete-modal-dialog">
+                <div class="delete-modal-content">
+                    <div class="delete-modal-header">
+                        <h5 class="delete-modal-title">
+                            <i class="bx bx-error-circle"></i> Konfirmasi Hapus
+                        </h5>
                     </div>
-                    <p>Tindakan ini tidak dapat dibatalkan.</p>
-                </div>
-                <div class="delete-modal-footer">
-                    <button type="button" class="delete-modal-btn delete-modal-btn-cancel"
-                        onclick="closeDeleteStockModal()">
-                        <i class="bx bx-x me-1"></i> Batal
-                    </button>
-                    <button type="button" class="delete-modal-btn delete-modal-btn-delete" onclick="deleteStock()">
-                        <i class="bx bx-trash me-1"></i> Hapus
-                    </button>
+                    <div class="delete-modal-body">
+                        <p>Apakah Anda yakin ingin menghapus stok ini?</p>
+                        <div class="delete-modal-product" id="deleteStockProduct">
+                            <!-- Stock info will be inserted here -->
+                        </div>
+                        <p>Tindakan ini tidak dapat dibatalkan.</p>
+                    </div>
+                    <div class="delete-modal-footer">
+                        <button type="button" class="delete-modal-btn delete-modal-btn-cancel"
+                            onclick="closeDeleteStockModal()">
+                            <i class="bx bx-x me-1"></i> Batal
+                        </button>
+                        <button type="button" class="delete-modal-btn delete-modal-btn-delete" onclick="deleteStock()">
+                            <i class="bx bx-trash me-1"></i> Hapus
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
 
-    <form id="delete-stock-form" method="POST" style="display: none;">
-        @csrf
-        @method('DELETE')
-    </form>
-@endsection
+        <form id="delete-stock-form" method="POST" style="display: none;">
+            @csrf
+            @method('DELETE')
+        </form>
+    @endsection
 
-@section('script')
-    <script>
-        function viewStockDetail(stockId) {
-            window.location.href = "{{ url('stocks') }}/" + stockId;
-        }
+    @section('script')
+        <script>
+            function viewStockDetail(stockId) {
+                window.location.href = "{{ url('stocks') }}/" + stockId;
+            }
 
-        function openDeleteStockModal(stockId, stockName, stockIdTag) {
-            event.stopPropagation();
+            function openDeleteStockModal(stockId, stockName, stockIdTag) {
+                event.stopPropagation();
 
-            // Set form action URL
-            document.getElementById('delete-stock-form').action = "{{ url('stocks') }}/" + stockId;
+                // Set form action URL
+                document.getElementById('delete-stock-form').action = "{{ url('stocks') }}/" + stockId;
 
-            // Set stock info in modal
-            document.getElementById('deleteStockProduct').innerHTML = `
+                // Set stock info in modal
+                document.getElementById('deleteStockProduct').innerHTML = `
       <div class="delete-modal-product-name">${stockName}</div>
       <div class="delete-modal-product-type">${stockIdTag}</div>
     `;
 
-            // Show the modal
-            const modal = document.getElementById('deleteStockModal');
+                // Show the modal
+                const modal = document.getElementById('deleteStockModal');
 
-            // Set display to flex first
-            modal.style.display = 'flex';
+                // Set display to flex first
+                modal.style.display = 'flex';
 
-            // Trigger a reflow
-            void modal.offsetWidth;
+                // Trigger a reflow
+                void modal.offsetWidth;
 
-            // Then add the show class for the transitions
-            modal.classList.add('show');
-            modal.style.opacity = '1';
-            modal.style.visibility = 'visible';
+                // Then add the show class for the transitions
+                modal.classList.add('show');
+                modal.style.opacity = '1';
+                modal.style.visibility = 'visible';
 
-            // Prevent background scrolling
-            document.body.style.overflow = 'hidden';
-        }
-
-        function closeDeleteStockModal() {
-            const modal = document.getElementById('deleteStockModal');
-
-            // Start the transition
-            modal.style.opacity = '0';
-
-            // Wait for transition to finish before hiding
-            setTimeout(function() {
-                modal.classList.remove('show');
-                modal.style.visibility = 'hidden';
-                modal.style.display = 'none';
-
-                // Re-enable background scrolling
-                document.body.style.overflow = '';
-            }, 300); // Match this to your CSS transition duration
-        }
-
-        function deleteStock() {
-            document.getElementById('delete-stock-form').submit();
-        }
-
-        // Close modal when clicking outside
-        document.getElementById('deleteStockModal').addEventListener('click', function(event) {
-            if (event.target === this) {
-                closeDeleteStockModal();
+                // Prevent background scrolling
+                document.body.style.overflow = 'hidden';
             }
-        });
 
-        // Close modal with ESC key
-        document.addEventListener('keydown', function(event) {
-            if (event.key === 'Escape' && document.getElementById('deleteStockModal').classList.contains('show')) {
-                closeDeleteStockModal();
-            }
-        });
+            function closeDeleteStockModal() {
+                const modal = document.getElementById('deleteStockModal');
 
-        // Show success modal if needed
-        @if (session('showSuccessModal'))
-            // Show success modal if it exists
-            const successModal = document.getElementById('successModal');
-            if (successModal) {
-                successModal.style.display = 'flex';
+                // Start the transition
+                modal.style.opacity = '0';
+
+                // Wait for transition to finish before hiding
                 setTimeout(function() {
-                    successModal.classList.add('show');
-                    successModal.style.opacity = '1';
-                    successModal.style.visibility = 'visible';
-                    document.body.style.overflow = 'hidden';
-                }, 10);
+                    modal.classList.remove('show');
+                    modal.style.visibility = 'hidden';
+                    modal.style.display = 'none';
+
+                    // Re-enable background scrolling
+                    document.body.style.overflow = '';
+                }, 300); // Match this to your CSS transition duration
             }
-        @endif
-    </script>
-@endsection
+
+            function deleteStock() {
+                document.getElementById('delete-stock-form').submit();
+            }
+
+            // Close modal when clicking outside
+            document.getElementById('deleteStockModal').addEventListener('click', function(event) {
+                if (event.target === this) {
+                    closeDeleteStockModal();
+                }
+            });
+
+            // Close modal with ESC key
+            document.addEventListener('keydown', function(event) {
+                if (event.key === 'Escape' && document.getElementById('deleteStockModal').classList.contains('show')) {
+                    closeDeleteStockModal();
+                }
+            });
+
+            // Show success modal if needed
+            @if (session('showSuccessModal'))
+                // Show success modal if it exists
+                const successModal = document.getElementById('successModal');
+                if (successModal) {
+                    successModal.style.display = 'flex';
+                    setTimeout(function() {
+                        successModal.classList.add('show');
+                        successModal.style.opacity = '1';
+                        successModal.style.visibility = 'visible';
+                        document.body.style.overflow = 'hidden';
+                    }, 10);
+                }
+            @endif
+        </script>
+    @endsection

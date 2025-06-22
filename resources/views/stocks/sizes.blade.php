@@ -60,6 +60,47 @@
             transform: scale(1.08);
         }
 
+        /* Status Badges */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.35rem 0.75rem;
+            border-radius: 50px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: white;
+            position: absolute;
+            top: 10px;
+            z-index: 10;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+        }
+
+        .stock-out {
+            left: 10px;
+            background-color: #ef4444;
+        }
+
+        .stock-minimal {
+            left: 10px;
+            background-color: #FF9800;
+        }
+
+        .nearly-expired {
+            right: 10px;
+            background-color: #FF9800;
+        }
+
+        .expired {
+            right: 10px;
+            background-color: #ef4444;
+        }
+
+        .status-badge i {
+            margin-right: 4px;
+            font-size: 0.8rem;
+        }
+
         /* Card Body */
         .stock-card .card-body {
             padding: 1.25rem;
@@ -685,16 +726,35 @@
         </div>
 
         <!-- Size-based Stock Grid -->
-        <!-- Size-based Stock Grid -->
         <div class="row">
             @forelse ($sizeGroups as $size => $stocks)
                 @php
-                    $totalQuantity = $stocks->sum('quantity');
                     // We need to make sure only non-deleted stocks are included in the group
-                    $nonDeletedStocks = $stocks->reject(function($stock) {
+                    $nonDeletedStocks = $stocks->reject(function ($stock) {
                         return $stock->trashed();
                     });
                     $totalQuantity = $nonDeletedStocks->sum('quantity');
+                    $lowStock = $totalQuantity <= 5 && $totalQuantity > 0;
+                    $stockOut = $totalQuantity <= 0;
+
+                    // Check if any stock is expired for this specific size
+                    $hasExpired = false;
+
+                    // Get all stocks for this master stock and specific size
+                    $allSizeStocks = \App\Models\Stock::where('master_stock_id', $masterStock->id)
+                        ->where('size', $size)
+                        ->whereNull('deleted_at')
+                        ->get();
+
+                    foreach ($allSizeStocks as $stockItem) {
+                        $expiredCheck = \Carbon\Carbon::parse($stockItem->expiration_date)->isPast();
+
+                        if ($expiredCheck) {
+                            $hasExpired = true;
+                            break;
+                        }
+                    }
+
                     $stock = $stocks->first(); // Representative stock for this size
                     $sizeImagePath =
                         isset($sizeImages[$size]) && $sizeImages[$size]->image
@@ -708,6 +768,22 @@
                         <div class="card-img-wrapper">
                             <img src="{{ $image }}" class="card-img-top"
                                 alt="{{ $masterStock->name }} - {{ $size }}">
+
+                            @if ($stockOut)
+                                <span class="status-badge stock-out">
+                                    <i class="bx bx-x-circle"></i> Stok Habis
+                                </span>
+                            @elseif($lowStock)
+                                <span class="status-badge stock-minimal">
+                                    <i class="bx bx-package"></i> Stok Menipis
+                                </span>
+                            @endif
+
+                            @if ($hasExpired)
+                                <span class="status-badge expired">
+                                    <i class="bx bx-x-circle"></i> Ada Kadaluwarsa
+                                </span>
+                            @endif
                         </div>
 
                         <div class="card-body">
@@ -790,7 +866,6 @@
             @method('DELETE')
         </form>
 
-
         <div class="success-modal-backdrop" id="successModal">
             <div class="success-modal-dialog">
                 <div class="success-modal-content">
@@ -812,132 +887,133 @@
                 </div>
             </div>
         </div>
-    @endsection
+    </div>
+@endsection
 
-    @section('script')
-        <script>
-            function viewStockBatches(masterStockId, size) {
-                window.location.href = "{{ url('stocks/batches') }}/" + masterStockId + "/" + encodeURIComponent(size);
-            }
+@section('script')
+    <script>
+        function viewStockBatches(masterStockId, size) {
+            window.location.href = "{{ url('stocks/batches') }}/" + masterStockId + "/" + encodeURIComponent(size);
+        }
 
-            function openDeleteSizeModal(size) {
-                event.stopPropagation();
+        function openDeleteSizeModal(size) {
+            event.stopPropagation();
 
-                // Set form action URL
-                document.getElementById('delete-size-form').action = "{{ url('stocks/size') }}/" + {{ $masterStock->id }} +
-                    "/" + encodeURIComponent(size);
+            // Set form action URL
+            document.getElementById('delete-size-form').action = "{{ url('stocks/size') }}/" + {{ $masterStock->id }} +
+                "/" + encodeURIComponent(size);
 
-                // Set size info in modal
-                document.getElementById('deleteSizeProduct').innerHTML = `
+            // Set size info in modal
+            document.getElementById('deleteSizeProduct').innerHTML = `
       <div class="delete-modal-product-name">{{ $masterStock->name }} - ${size}</div>
     `;
 
-                // Show the modal
-                const modal = document.getElementById('deleteSizeModal');
+            // Show the modal
+            const modal = document.getElementById('deleteSizeModal');
 
-                // Set display to flex first
-                modal.style.display = 'flex';
+            // Set display to flex first
+            modal.style.display = 'flex';
 
-                // Trigger a reflow
-                void modal.offsetWidth;
+            // Trigger a reflow
+            void modal.offsetWidth;
 
-                // Then add the show class for the transitions
-                modal.classList.add('show');
-                modal.style.opacity = '1';
-                modal.style.visibility = 'visible';
+            // Then add the show class for the transitions
+            modal.classList.add('show');
+            modal.style.opacity = '1';
+            modal.style.visibility = 'visible';
 
-                // Prevent background scrolling
-                document.body.style.overflow = 'hidden';
-            }
+            // Prevent background scrolling
+            document.body.style.overflow = 'hidden';
+        }
 
-            function closeDeleteSizeModal() {
-                const modal = document.getElementById('deleteSizeModal');
+        function closeDeleteSizeModal() {
+            const modal = document.getElementById('deleteSizeModal');
 
-                // Start the transition
+            // Start the transition
+            modal.style.opacity = '0';
+
+            // Wait for transition to finish before hiding
+            setTimeout(function() {
+                modal.classList.remove('show');
+                modal.style.visibility = 'hidden';
+                modal.style.display = 'none';
+
+                // Re-enable background scrolling
+                document.body.style.overflow = '';
+            }, 300); // Match this to your CSS transition duration
+        }
+
+        function deleteSize() {
+            document.getElementById('delete-size-form').submit();
+        }
+
+        // Define closeSuccessModal at the top level so it's available everywhere
+        function closeSuccessModal() {
+            const modal = document.getElementById('successModal');
+            if (modal) {
+                modal.classList.remove('show');
                 modal.style.opacity = '0';
-
-                // Wait for transition to finish before hiding
                 setTimeout(function() {
-                    modal.classList.remove('show');
-                    modal.style.visibility = 'hidden';
                     modal.style.display = 'none';
-
-                    // Re-enable background scrolling
                     document.body.style.overflow = '';
-                }, 300); // Match this to your CSS transition duration
+                }, 300);
+            }
+        }
+
+        // Document ready event for all event listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            // Close modal when clicking outside
+            const deleteSizeModal = document.getElementById('deleteSizeModal');
+            if (deleteSizeModal) {
+                deleteSizeModal.addEventListener('click', function(event) {
+                    if (event.target === this) {
+                        closeDeleteSizeModal();
+                    }
+                });
             }
 
-            function deleteSize() {
-                document.getElementById('delete-size-form').submit();
-            }
-
-            // Define closeSuccessModal at the top level so it's available everywhere
-            function closeSuccessModal() {
-                const modal = document.getElementById('successModal');
-                if (modal) {
-                    modal.classList.remove('show');
-                    modal.style.opacity = '0';
-                    setTimeout(function() {
-                        modal.style.display = 'none';
-                        document.body.style.overflow = '';
-                    }, 300);
+            // Close modal with ESC key
+            document.addEventListener('keydown', function(event) {
+                if (event.key === 'Escape') {
+                    if (document.getElementById('deleteSizeModal')?.classList.contains('show')) {
+                        closeDeleteSizeModal();
+                    }
+                    if (document.getElementById('successModal')?.classList.contains('show')) {
+                        closeSuccessModal();
+                    }
                 }
-            }
+            });
 
-            // Document ready event for all event listeners
-            document.addEventListener('DOMContentLoaded', function() {
-                // Close modal when clicking outside
-                const deleteSizeModal = document.getElementById('deleteSizeModal');
-                if (deleteSizeModal) {
-                    deleteSizeModal.addEventListener('click', function(event) {
-                        if (event.target === this) {
-                            closeDeleteSizeModal();
+            // Show success modal if needed
+            @if (session('success') || session('showSuccessModal'))
+                // Get the modal element
+                const successModal = document.getElementById('successModal');
+
+                // Set custom message if available
+                @if (session('message'))
+                    const successMessage = document.getElementById('success-message');
+                    if (successMessage) {
+                        successMessage.textContent = "{{ session('message') }}";
+                    }
+                @endif
+
+                // Show the modal
+                if (successModal) {
+                    successModal.style.display = 'flex';
+                    setTimeout(function() {
+                        successModal.classList.add('show');
+                        successModal.style.opacity = '1';
+                        document.body.style.overflow = 'hidden';
+                    }, 100);
+
+                    // Add click handler for closing
+                    successModal.addEventListener('click', function(e) {
+                        if (e.target === this) {
+                            closeSuccessModal();
                         }
                     });
                 }
-
-                // Close modal with ESC key
-                document.addEventListener('keydown', function(event) {
-                    if (event.key === 'Escape') {
-                        if (document.getElementById('deleteSizeModal')?.classList.contains('show')) {
-                            closeDeleteSizeModal();
-                        }
-                        if (document.getElementById('successModal')?.classList.contains('show')) {
-                            closeSuccessModal();
-                        }
-                    }
-                });
-
-                // Show success modal if needed
-                @if (session('success') || session('showSuccessModal'))
-                    // Get the modal element
-                    const successModal = document.getElementById('successModal');
-
-                    // Set custom message if available
-                    @if (session('message'))
-                        const successMessage = document.getElementById('success-message');
-                        if (successMessage) {
-                            successMessage.textContent = "{{ session('message') }}";
-                        }
-                    @endif
-
-                    // Show the modal
-                    if (successModal) {
-                        successModal.style.display = 'flex';
-                        setTimeout(function() {
-                            successModal.classList.add('show');
-                            successModal.style.opacity = '1';
-                            document.body.style.overflow = 'hidden';
-                        }, 100);
-
-                        // Add click handler for closing
-                        successModal.addEventListener('click', function(e) {
-                            if (e.target === this) {
-                                closeSuccessModal();
-                            }
-                        });
-                    }
-                @endif
-            });
-        </script>
-    @endsection
+            @endif
+        });
+    </script>
+@endsection

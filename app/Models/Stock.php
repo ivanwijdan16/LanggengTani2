@@ -76,7 +76,7 @@ class Stock extends Model
     // Method to check if stock is low
     public function isLowStock()
     {
-        return $this->quantity <= 3 && $this->quantity > 0;
+        return $this->quantity <= 5 && $this->quantity > 0;
     }
 
     // Method to check if stock is out

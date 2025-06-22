@@ -50,7 +50,8 @@
             border-bottom: 1px solid #f1f5f9;
             display: flex;
             align-items: flex-start;
-            transition: background-color 0.2s;
+            transition: all 0.3s ease;
+            position: relative;
         }
 
         .notification-item:last-child {
@@ -59,6 +60,26 @@
 
         .notification-item:hover {
             background-color: #f8fafc;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .notification-item.clickable {
+            cursor: pointer;
+        }
+
+        .notification-item.clickable:hover {
+            background-color: #f0fdfa;
+            border-left: 4px solid #149d80;
+        }
+
+        .notification-item.read {
+            opacity: 0.7;
+        }
+
+        .notification-item.unread {
+            background-color: #f9fafb;
+            border-left: 4px solid #149d80;
         }
 
         .notification-icon {
@@ -73,6 +94,21 @@
             justify-content: center;
             color: #149d80;
             font-size: 1.25rem;
+        }
+
+        .notification-icon.danger {
+            background-color: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+        }
+
+        .notification-icon.warning {
+            background-color: rgba(245, 158, 11, 0.1);
+            color: #f59e0b;
+        }
+
+        .notification-icon.success {
+            background-color: rgba(16, 185, 129, 0.1);
+            color: #10b981;
         }
 
         .notification-content {
@@ -167,6 +203,23 @@
             color: #dc2626;
         }
 
+        .badge-unread {
+            background-color: #149d80;
+            color: white;
+        }
+
+        .clickable-hint {
+            font-size: 0.75rem;
+            color: #64748b;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            margin-top: 0.25rem;
+        }
+
+        .notification-item.clickable:hover .clickable-hint {
+            opacity: 1;
+        }
+
         /* Responsive styles */
         @media (max-width: 768px) {
             .notification-item {
@@ -217,14 +270,19 @@
                                     ? 'Kemarin'
                                     : \Carbon\Carbon::parse($notification->created_at)->format('d F Y'));
 
-                            // Determine notification type based on message content (example logic)
+                            // Determine notification type based on message content
                             $type = 'info';
-                            if (str_contains(strtolower($notification->message), 'kadaluarsa')) {
+                            if (str_contains(strtolower($notification->message), 'kadaluwarsa')) {
                                 $type = 'danger';
-                            } elseif (str_contains(strtolower($notification->message), 'hampir')) {
+                            } elseif (
+                                str_contains(strtolower($notification->message), 'hampir') ||
+                                str_contains(strtolower($notification->message), 'menipis')
+                            ) {
                                 $type = 'warning';
                             } elseif (str_contains(strtolower($notification->message), 'berhasil')) {
                                 $type = 'success';
+                            } elseif (str_contains(strtolower($notification->message), 'habis')) {
+                                $type = 'danger';
                             }
 
                             // Set icon based on type
@@ -236,6 +294,9 @@
                             } elseif ($type === 'success') {
                                 $icon = 'bx-check-circle';
                             }
+
+                            // Check if notification is clickable
+                            $isClickable = $notification->stock && $notification->stock->masterStock;
                         @endphp
 
                         @if ($currentDate !== $notificationDate)
@@ -247,13 +308,19 @@
                             @endphp
                         @endif
 
-                        <li class="notification-item">
-                            <div class="notification-icon">
+                        <li class="notification-item {{ $isClickable ? 'clickable' : '' }} {{ $notification->read ? 'read' : 'unread' }}"
+                            @if ($isClickable) onclick="handleNotificationClick({{ $notification->id }})"
+                                data-notification-id="{{ $notification->id }}" @endif>
+                            <div class="notification-icon {{ $type }}">
                                 <i class="bx {{ $icon }}"></i>
                             </div>
                             <div class="notification-content">
                                 <div class="notification-message">
                                     {{ $notification->message }}
+
+                                    @if (!$notification->read)
+                                        <span class="notification-badge badge-unread">Baru</span>
+                                    @endif
 
                                     @if ($type === 'danger')
                                         <span class="notification-badge badge-danger">Penting</span>
@@ -267,6 +334,11 @@
                                     <i class="bx bx-time"></i>
                                     {{ \Carbon\Carbon::parse($notification->created_at)->format('H:i') }}
                                 </div>
+                                @if ($isClickable)
+                                    <div class="clickable-hint">
+                                        <i class="bx bx-mouse"></i> Klik untuk melihat detail stok
+                                    </div>
+                                @endif
                             </div>
                         </li>
                     @endforeach
@@ -282,4 +354,58 @@
             @endif
         </div>
     </div>
+@endsection
+
+@section('script')
+    <script>
+        function handleNotificationClick(notificationId) {
+            // Mark notification as read and get redirect URL
+            fetch(`/notifications/${notificationId}/markAsRead`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success' && data.redirect_url) {
+                        // Update notification appearance
+                        const notificationElement = document.querySelector(
+                        `[data-notification-id="${notificationId}"]`);
+                        if (notificationElement) {
+                            notificationElement.classList.remove('unread');
+                            notificationElement.classList.add('read');
+
+                            // Remove "Baru" badge
+                            const badge = notificationElement.querySelector('.badge-unread');
+                            if (badge) {
+                                badge.remove();
+                            }
+                        }
+
+                        // Redirect to the stock batches page
+                        window.location.href = data.redirect_url;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    // Fallback - just mark as read without redirect
+                    const notificationElement = document.querySelector(`[data-notification-id="${notificationId}"]`);
+                    if (notificationElement) {
+                        notificationElement.classList.remove('unread');
+                        notificationElement.classList.add('read');
+                    }
+                });
+        }
+
+        // Add hover effect for better UX
+        document.addEventListener('DOMContentLoaded', function() {
+            const notifications = document.querySelectorAll('.notification-item.clickable');
+
+            notifications.forEach(notification => {
+                notification.style.cursor = 'pointer';
+            });
+        });
+    </script>
 @endsection

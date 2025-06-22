@@ -67,6 +67,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/checkout', [TransactionController::class, 'checkout'])->name('checkout');
     Route::get('/transaction/success/{id}', [TransactionController::class, 'showSuccess'])->name('transaction.success');
     Route::post('/cart/{id}', [CartController::class, 'removeFromCart']);
+
     // Notifications (semua user dapat akses)
     Route::get('/notifications', [NotificationController::class, 'getNotifications']);
     Route::post('/notifications/{id}/markAsRead', [NotificationController::class, 'markAsRead']);
